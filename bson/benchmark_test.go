@@ -388,7 +388,6 @@ func codeInit() {
 	}
 }
 
-// TODO(CEV): use this
 func BenchmarkCodeUnmarshal(b *testing.B) {
 	b.ReportAllocs()
 	if codeJSON == nil {
@@ -420,7 +419,6 @@ func BenchmarkCodeUnmarshal(b *testing.B) {
 	})
 }
 
-// TODO(CEV): use this
 func BenchmarkCodeMarshal(b *testing.B) {
 	b.ReportAllocs()
 	if codeJSON == nil {

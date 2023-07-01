@@ -54,7 +54,7 @@ func (pc *PointerCodec) EncodeValue(ec EncodeContext, vw bsonrw.ValueWriter, val
 		}
 		return v.EncodeValue(ec, vw, val.Elem())
 	}
-	// TODO: handle concurrent requests for the same type
+	// TODO(charlie): handle concurrent requests for the same type
 	enc, err := ec.LookupEncoder(typ.Elem())
 	enc = pc.ecache.LoadOrStore(typ, enc)
 	if err != nil {
@@ -70,27 +70,27 @@ func (pc *PointerCodec) DecodeValue(dc DecodeContext, vr bsonrw.ValueReader, val
 		return ValueDecoderError{Name: "PointerCodec.DecodeValue", Kinds: []reflect.Kind{reflect.Ptr}, Received: val}
 	}
 
+	typ := val.Type()
 	if vr.Type() == bsontype.Null {
-		val.Set(reflect.Zero(val.Type()))
+		val.Set(reflect.Zero(typ))
 		return vr.ReadNull()
 	}
 	if vr.Type() == bsontype.Undefined {
-		val.Set(reflect.Zero(val.Type()))
+		val.Set(reflect.Zero(typ))
 		return vr.ReadUndefined()
 	}
 
 	if val.IsNil() {
-		val.Set(reflect.New(val.Type().Elem()))
+		val.Set(reflect.New(typ.Elem()))
 	}
 
-	typ := val.Type()
 	if v, ok := pc.dcache.Load(typ); ok {
 		if v == nil {
 			return ErrNoDecoder{Type: typ}
 		}
 		return v.DecodeValue(dc, vr, val.Elem())
 	}
-	// TODO: handle concurrent requests for the same type
+	// TODO(charlie): handle concurrent requests for the same type
 	dec, err := dc.LookupDecoder(typ.Elem())
 	dec = pc.dcache.LoadOrStore(typ, dec)
 	if err != nil {
