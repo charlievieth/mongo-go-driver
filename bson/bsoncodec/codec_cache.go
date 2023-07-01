@@ -6,30 +6,34 @@ import (
 	"sync/atomic"
 )
 
-type encoderCache struct {
+// statically assert array size
+var _ = (kindEncoderCache{}).entries[reflect.UnsafePointer]
+var _ = (kindDecoderCache{}).entries[reflect.UnsafePointer]
+
+type typeEncoderCache struct {
 	cache sync.Map // map[reflect.Type]ValueEncoder
 }
 
-func (c *encoderCache) Store(rt reflect.Type, enc ValueEncoder) {
+func (c *typeEncoderCache) Store(rt reflect.Type, enc ValueEncoder) {
 	c.cache.Store(rt, enc)
 }
 
-func (c *encoderCache) Load(rt reflect.Type) (ValueEncoder, bool) {
+func (c *typeEncoderCache) Load(rt reflect.Type) (ValueEncoder, bool) {
 	if v, _ := c.cache.Load(rt); v != nil {
 		return v.(ValueEncoder), true
 	}
 	return nil, false
 }
 
-func (c *encoderCache) LoadOrStore(rt reflect.Type, enc ValueEncoder) ValueEncoder {
+func (c *typeEncoderCache) LoadOrStore(rt reflect.Type, enc ValueEncoder) ValueEncoder {
 	if v, loaded := c.cache.LoadOrStore(rt, enc); loaded {
 		enc = v.(ValueEncoder)
 	}
 	return enc
 }
 
-func (c *encoderCache) Clone() *encoderCache {
-	cc := new(encoderCache)
+func (c *typeEncoderCache) Clone() *typeEncoderCache {
+	cc := new(typeEncoderCache)
 	c.cache.Range(func(k, v interface{}) bool {
 		if k != nil && v != nil {
 			cc.cache.Store(k, v)
@@ -39,30 +43,30 @@ func (c *encoderCache) Clone() *encoderCache {
 	return cc
 }
 
-type decoderCache struct {
+type typeDecoderCache struct {
 	cache sync.Map // map[reflect.Type]ValueDecoder
 }
 
-func (c *decoderCache) Store(rt reflect.Type, dec ValueDecoder) {
+func (c *typeDecoderCache) Store(rt reflect.Type, dec ValueDecoder) {
 	c.cache.Store(rt, dec)
 }
 
-func (c *decoderCache) Load(rt reflect.Type) (ValueDecoder, bool) {
+func (c *typeDecoderCache) Load(rt reflect.Type) (ValueDecoder, bool) {
 	if v, _ := c.cache.Load(rt); v != nil {
 		return v.(ValueDecoder), true
 	}
 	return nil, false
 }
 
-func (c *decoderCache) LoadOrStore(rt reflect.Type, dec ValueDecoder) ValueDecoder {
+func (c *typeDecoderCache) LoadOrStore(rt reflect.Type, dec ValueDecoder) ValueDecoder {
 	if v, loaded := c.cache.LoadOrStore(rt, dec); loaded {
 		dec = v.(ValueDecoder)
 	}
 	return dec
 }
 
-func (c *decoderCache) Clone() *decoderCache {
-	cc := new(decoderCache)
+func (c *typeDecoderCache) Clone() *typeDecoderCache {
+	cc := new(typeDecoderCache)
 	c.cache.Range(func(k, v interface{}) bool {
 		if k != nil && v != nil {
 			cc.cache.Store(k, v)
@@ -72,16 +76,16 @@ func (c *decoderCache) Clone() *decoderCache {
 	return cc
 }
 
-// atomic.Value requires that all calls to Store() have the same concrete
-// type so we wrap the ValueEncoder with a kindEncoderCacheEntry to ensure
-// the type is always the same (since different concrete types may implement
-// the ValueEncoder interface).
+// atomic.Value requires that all calls to Store() have the same concrete type
+// so we wrap the ValueEncoder with a kindEncoderCacheEntry to ensure the type
+// is always the same (since different concrete types may implement the
+// ValueEncoder interface).
 type kindEncoderCacheEntry struct {
 	enc ValueEncoder
 }
 
 type kindEncoderCache struct {
-	entries [reflect.UnsafePointer]atomic.Value // *kindEncoderCacheEntry
+	entries [reflect.UnsafePointer + 1]atomic.Value // *kindEncoderCacheEntry
 }
 
 func (c *kindEncoderCache) Store(rt reflect.Kind, enc ValueEncoder) {
@@ -109,16 +113,16 @@ func (c *kindEncoderCache) Clone() *kindEncoderCache {
 	return cc
 }
 
-// atomic.Value requires that all calls to Store() have the same concrete
-// type so we wrap the ValueDecoder with a kindDecoderCacheEntry to ensure
-// the type is always the same (since different concrete types may implement
-// the ValueDecoder interface).
+// atomic.Value requires that all calls to Store() have the same concrete type
+// so we wrap the ValueDecoder with a kindDecoderCacheEntry to ensure the type
+// is always the same (since different concrete types may implement the
+// ValueDecoder interface).
 type kindDecoderCacheEntry struct {
 	dec ValueDecoder
 }
 
 type kindDecoderCache struct {
-	entries [reflect.UnsafePointer]atomic.Value // *kindDecoderCacheEntry
+	entries [reflect.UnsafePointer + 1]atomic.Value // *kindDecoderCacheEntry
 }
 
 func (c *kindDecoderCache) Store(rt reflect.Kind, dec ValueDecoder) {

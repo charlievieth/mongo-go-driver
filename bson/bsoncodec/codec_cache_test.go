@@ -7,8 +7,85 @@ import (
 	"testing"
 )
 
+var codecCacheTestTypes = [16]reflect.Type{
+	reflect.TypeOf(uint8(0)),
+	reflect.TypeOf(uint16(0)),
+	reflect.TypeOf(uint32(0)),
+	reflect.TypeOf(uint64(0)),
+	reflect.TypeOf(uint(0)),
+	reflect.TypeOf(uintptr(0)),
+	reflect.TypeOf(int8(0)),
+	reflect.TypeOf(int16(0)),
+	reflect.TypeOf(int32(0)),
+	reflect.TypeOf(int64(0)),
+	reflect.TypeOf(int(0)),
+	reflect.TypeOf(float32(0)),
+	reflect.TypeOf(float64(0)),
+	reflect.TypeOf(true),
+	reflect.TypeOf(struct{ A int }{}),
+	reflect.TypeOf(map[int]int{}),
+}
+
+func TestTypeCache(t *testing.T) {
+	rt := reflect.TypeOf(int(0))
+	ec := new(typeEncoderCache)
+	dc := new(typeDecoderCache)
+
+	codec := new(fakeCodec)
+	ec.Store(rt, codec)
+	dc.Store(rt, codec)
+	if v, ok := ec.Load(rt); !ok || !reflect.DeepEqual(v, codec) {
+		t.Errorf("Load(%s) = %v, %t; want: %v, %t", rt, v, ok, codec, true)
+	}
+	if v, ok := dc.Load(rt); !ok || !reflect.DeepEqual(v, codec) {
+		t.Errorf("Load(%s) = %v, %t; want: %v, %t", rt, v, ok, codec, true)
+	}
+
+	// Make sure we overwrite the stored value with nil
+	ec.Store(rt, nil)
+	dc.Store(rt, nil)
+	if v, ok := ec.Load(rt); ok || v != nil {
+		t.Errorf("Load(%s) = %v, %t; want: %v, %t", rt, v, ok, nil, false)
+	}
+	if v, ok := dc.Load(rt); ok || v != nil {
+		t.Errorf("Load(%s) = %v, %t; want: %v, %t", rt, v, ok, nil, false)
+	}
+}
+
+func TestTypeCacheClone(t *testing.T) {
+	codec := new(fakeCodec)
+	ec1 := new(typeEncoderCache)
+	dc1 := new(typeDecoderCache)
+	for _, rt := range codecCacheTestTypes {
+		ec1.Store(rt, codec)
+		dc1.Store(rt, codec)
+	}
+	ec2 := ec1.Clone()
+	dc2 := dc1.Clone()
+	for _, rt := range codecCacheTestTypes {
+		if v, _ := ec2.Load(rt); !reflect.DeepEqual(v, codec) {
+			t.Errorf("Load(%s) = %#v; want: %#v", rt, v, codec)
+		}
+		if v, _ := dc2.Load(rt); !reflect.DeepEqual(v, codec) {
+			t.Errorf("Load(%s) = %#v; want: %#v", rt, v, codec)
+		}
+	}
+}
+
 func TestKindCacheArray(t *testing.T) {
-	// Make sure that reflect.UnsafePointer is the largest reflect.Type.
+	// Check array bounds
+	var c kindEncoderCache
+	codec := new(fakeCodec)
+	c.Store(reflect.UnsafePointer, codec)   // valid
+	c.Store(reflect.UnsafePointer+1, codec) // ignored
+	if v, ok := c.Load(reflect.UnsafePointer); !ok || v != codec {
+		t.Errorf("Load(reflect.UnsafePointer) = %v, %t; want: %v, %t", v, ok, codec, true)
+	}
+	if v, ok := c.Load(reflect.UnsafePointer + 1); ok || v != nil {
+		t.Errorf("Load(reflect.UnsafePointer + 1) = %v, %t; want: %v, %t", v, ok, nil, false)
+	}
+
+	// Make sure that reflect.UnsafePointer is the last/largest reflect.Type.
 	//
 	// The String() method of invalid reflect.Type types are of the format
 	// "kind{NUMBER}".
@@ -23,26 +100,25 @@ func TestKindCacheArray(t *testing.T) {
 func TestKindCacheClone(t *testing.T) {
 	e1 := new(kindEncoderCache)
 	d1 := new(kindDecoderCache)
+	codec := new(fakeCodec)
 	for k := reflect.Invalid; k <= reflect.UnsafePointer; k++ {
-		if k&1 == 0 {
-			e1.Store(k, new(fakeCodec))
-			d1.Store(k, new(fakeCodec))
-		}
+		e1.Store(k, codec)
+		d1.Store(k, codec)
 	}
 	e2 := e1.Clone()
 	for k := reflect.Invalid; k <= reflect.UnsafePointer; k++ {
 		v1, ok1 := e1.Load(k)
 		v2, ok2 := e2.Load(k)
-		if !reflect.DeepEqual(v1, v2) || ok1 != ok2 {
-			t.Errorf("Encoder: %v, %t != %v, %t", v1, ok1, v2, ok2)
+		if ok1 != ok2 || !reflect.DeepEqual(v1, v2) || v1 == nil || v2 == nil {
+			t.Errorf("Encoder(%s): %#v, %t != %#v, %t", k, v1, ok1, v2, ok2)
 		}
 	}
 	d2 := d1.Clone()
 	for k := reflect.Invalid; k <= reflect.UnsafePointer; k++ {
 		v1, ok1 := d1.Load(k)
 		v2, ok2 := d2.Load(k)
-		if !reflect.DeepEqual(v1, v2) || ok1 != ok2 {
-			t.Errorf("Decoder: %v, %t != %v, %t", v1, ok1, v2, ok2)
+		if ok1 != ok2 || !reflect.DeepEqual(v1, v2) || v1 == nil || v2 == nil {
+			t.Errorf("Decoder(%s): %#v, %t != %#v, %t", k, v1, ok1, v2, ok2)
 		}
 	}
 }
@@ -66,29 +142,10 @@ func TestKindCacheEncoderNilEncoder(t *testing.T) {
 	})
 }
 
-var codecCacheTestTypes = [16]reflect.Type{
-	reflect.TypeOf(uint8(0)),
-	reflect.TypeOf(uint16(0)),
-	reflect.TypeOf(uint32(0)),
-	reflect.TypeOf(uint64(0)),
-	reflect.TypeOf(uint(0)),
-	reflect.TypeOf(uintptr(0)),
-	reflect.TypeOf(int8(0)),
-	reflect.TypeOf(int16(0)),
-	reflect.TypeOf(int32(0)),
-	reflect.TypeOf(int64(0)),
-	reflect.TypeOf(int(0)),
-	reflect.TypeOf(float32(0)),
-	reflect.TypeOf(float64(0)),
-	reflect.TypeOf(true),
-	reflect.TypeOf(struct{ A int }{}),
-	reflect.TypeOf(map[int]int{}),
-}
-
 func BenchmarkEncoderCacheLoad(b *testing.B) {
-	typs := codecCacheTestTypes
-	c := new(encoderCache)
+	c := new(typeEncoderCache)
 	codec := new(fakeCodec)
+	typs := codecCacheTestTypes
 	for _, t := range typs {
 		c.Store(t, codec)
 	}
@@ -100,10 +157,10 @@ func BenchmarkEncoderCacheLoad(b *testing.B) {
 }
 
 func BenchmarkEncoderCacheStore(b *testing.B) {
-	typs := codecCacheTestTypes
-	c := new(encoderCache)
+	c := new(typeEncoderCache)
 	codec := new(fakeCodec)
 	b.RunParallel(func(pb *testing.PB) {
+		typs := codecCacheTestTypes
 		for i := 0; pb.Next(); i++ {
 			c.Store(typs[i%len(typs)], codec)
 		}

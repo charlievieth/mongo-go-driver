@@ -239,8 +239,8 @@ type Registry struct {
 	// TODO: use atomic.Value for these so they are thread-safe
 	interfaceEncoders []interfaceValueEncoder
 	interfaceDecoders []interfaceValueDecoder
-	typeEncoders      *encoderCache
-	typeDecoders      *decoderCache
+	typeEncoders      *typeEncoderCache
+	typeDecoders      *typeDecoderCache
 	kindEncoders      *kindEncoderCache
 	kindDecoders      *kindDecoderCache
 	typeMap           sync.Map // map[bsontype.Type]reflect.Type
@@ -249,8 +249,8 @@ type Registry struct {
 // NewRegistry creates a new empty Registry.
 func NewRegistry() *Registry {
 	return &Registry{
-		typeEncoders: new(encoderCache),
-		typeDecoders: new(decoderCache),
+		typeEncoders: new(typeEncoderCache),
+		typeDecoders: new(typeDecoderCache),
 		kindEncoders: new(kindEncoderCache),
 		kindDecoders: new(kindDecoderCache),
 	}

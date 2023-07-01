@@ -21,8 +21,8 @@ var _ ValueDecoder = &PointerCodec{}
 // Deprecated: Use [go.mongodb.org/mongo-driver/bson.NewRegistry] to get a registry with the
 // PointerCodec registered.
 type PointerCodec struct {
-	ecache encoderCache
-	dcache decoderCache
+	ecache typeEncoderCache
+	dcache typeDecoderCache
 }
 
 // NewPointerCodec returns a PointerCodec that has been initialized.
