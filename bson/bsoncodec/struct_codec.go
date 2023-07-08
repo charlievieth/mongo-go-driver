@@ -683,21 +683,21 @@ func getInlineField(val reflect.Value, index []int) (reflect.Value, error) {
 
 // DeepZero returns recursive zero object
 func deepZero(st reflect.Type) (result reflect.Value) {
-	result = reflect.Indirect(reflect.New(st))
-
-	if result.Kind() == reflect.Struct {
-		for i := 0; i < result.NumField(); i++ {
-			if f := result.Field(i); f.Kind() == reflect.Ptr {
-				if f.CanInterface() {
-					if ft := reflect.TypeOf(f.Interface()); ft.Elem().Kind() == reflect.Struct {
-						result.Field(i).Set(recursivePointerTo(deepZero(ft.Elem())))
-					}
+	if st.Kind() == reflect.Struct {
+		numField := st.NumField()
+		for i := 0; i < numField; i++ {
+			if result == emptyValue {
+				result = reflect.Indirect(reflect.New(st))
+			}
+			f := result.Field(i)
+			if f.CanInterface() {
+				if f.Type().Kind() == reflect.Struct {
+					result.Field(i).Set(recursivePointerTo(deepZero(f.Type().Elem())))
 				}
 			}
 		}
 	}
-
-	return
+	return result
 }
 
 // recursivePointerTo calls reflect.New(v.Type) but recursively for its fields inside

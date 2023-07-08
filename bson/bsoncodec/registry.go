@@ -401,7 +401,7 @@ func (r *Registry) LookupEncoder(valueType reflect.Type) (ValueEncoder, error) {
 	if found {
 		return r.typeEncoders.LoadOrStore(valueType, enc), nil
 	}
-	// WARN: this is incorrect if a InterfaceEncoder is added later
+	// WARN(charlie): this is incorrect if a InterfaceEncoder is added later
 	if valueType == nil {
 		r.storeTypeEncoder(valueType, nil)
 		return nil, ErrNoEncoder{Type: valueType}
