@@ -2392,7 +2392,7 @@ func TestDefaultValueDecoders(t *testing.T) {
 					}()
 					err := tc.vd.DecodeValue(dc, llvrw, val)
 					if !compareErrors(err, rc.err) {
-						t.Errorf("Errors do not match. got %v; want %v", err, rc.err)
+						t.Errorf("%+v Errors do not match. got %v; want %v", rc, err, rc.err)
 					}
 					invoked := llvrw.Invoked
 					if !cmp.Equal(invoked, rc.invoke) {

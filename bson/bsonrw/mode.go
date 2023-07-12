@@ -10,7 +10,7 @@ import (
 	"fmt"
 )
 
-type mode int
+type mode int32
 
 const (
 	_ mode = iota

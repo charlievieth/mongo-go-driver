@@ -150,7 +150,7 @@ func (dvd DefaultValueDecoders) DDecodeValue(dc DecodeContext, vr bsonrw.ValueRe
 	case bsontype.Type(0), bsontype.EmbeddedDocument:
 		dc.Ancestor = tD
 	case bsontype.Null:
-		val.Set(reflect.Zero(val.Type()))
+		zeroValue(val)
 		return vr.ReadNull()
 	default:
 		return fmt.Errorf("cannot decode %v into a primitive.D", vrType)
@@ -261,94 +261,20 @@ func (dvd DefaultValueDecoders) BooleanDecodeValue(dctx DecodeContext, vr bsonrw
 	return nil
 }
 
-func (DefaultValueDecoders) intDecodeType(dc DecodeContext, vr bsonrw.ValueReader, t reflect.Type) (reflect.Value, error) {
-	var i64 int64
-	var err error
-	switch vrType := vr.Type(); vrType {
-	case bsontype.Int32:
-		i32, err := vr.ReadInt32()
-		if err != nil {
-			return emptyValue, err
-		}
-		i64 = int64(i32)
-	case bsontype.Int64:
-		i64, err = vr.ReadInt64()
-		if err != nil {
-			return emptyValue, err
-		}
-	case bsontype.Double:
-		f64, err := vr.ReadDouble()
-		if err != nil {
-			return emptyValue, err
-		}
-		if !dc.Truncate && math.Floor(f64) != f64 {
-			return emptyValue, errCannotTruncate
-		}
-		if f64 > float64(math.MaxInt64) {
-			return emptyValue, fmt.Errorf("%g overflows int64", f64)
-		}
-		i64 = int64(f64)
-	case bsontype.Boolean:
-		b, err := vr.ReadBoolean()
-		if err != nil {
-			return emptyValue, err
-		}
-		if b {
-			i64 = 1
-		}
-	case bsontype.Null:
-		if err = vr.ReadNull(); err != nil {
-			return emptyValue, err
-		}
-	case bsontype.Undefined:
-		if err = vr.ReadUndefined(); err != nil {
-			return emptyValue, err
-		}
-	default:
-		return emptyValue, fmt.Errorf("cannot decode %v into an integer type", vrType)
+// TODO: why do we need this ???
+func (dvd DefaultValueDecoders) intDecodeType(dc DecodeContext, vr bsonrw.ValueReader, t reflect.Type) (reflect.Value, error) {
+	val := reflect.New(t).Elem()
+	if err := dvd.IntDecodeValue(dc, vr, val); err != nil {
+		return emptyValue, err
 	}
-
-	switch t.Kind() {
-	case reflect.Int8:
-		if i64 < math.MinInt8 || i64 > math.MaxInt8 {
-			return emptyValue, fmt.Errorf("%d overflows int8", i64)
-		}
-
-		return reflect.ValueOf(int8(i64)), nil
-	case reflect.Int16:
-		if i64 < math.MinInt16 || i64 > math.MaxInt16 {
-			return emptyValue, fmt.Errorf("%d overflows int16", i64)
-		}
-
-		return reflect.ValueOf(int16(i64)), nil
-	case reflect.Int32:
-		if i64 < math.MinInt32 || i64 > math.MaxInt32 {
-			return emptyValue, fmt.Errorf("%d overflows int32", i64)
-		}
-
-		return reflect.ValueOf(int32(i64)), nil
-	case reflect.Int64:
-		return reflect.ValueOf(i64), nil
-	case reflect.Int:
-		if int64(int(i64)) != i64 { // Can we fit this inside of an int
-			return emptyValue, fmt.Errorf("%d overflows int", i64)
-		}
-
-		return reflect.ValueOf(int(i64)), nil
-	default:
-		return emptyValue, ValueDecoderError{
-			Name:     "IntDecodeValue",
-			Kinds:    []reflect.Kind{reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64, reflect.Int},
-			Received: reflect.Zero(t),
-		}
-	}
+	return val, nil
 }
 
 // IntDecodeValue is the ValueDecoderFunc for int types.
 //
 // Deprecated: Use [go.mongodb.org/mongo-driver/bson.NewRegistry] to get a registry with all default
 // value decoders registered.
-func (dvd DefaultValueDecoders) IntDecodeValue(dc DecodeContext, vr bsonrw.ValueReader, val reflect.Value) error {
+func (DefaultValueDecoders) IntDecodeValue(dc DecodeContext, vr bsonrw.ValueReader, val reflect.Value) error {
 	if !val.CanSet() {
 		return ValueDecoderError{
 			Name:     "IntDecodeValue",
@@ -357,12 +283,68 @@ func (dvd DefaultValueDecoders) IntDecodeValue(dc DecodeContext, vr bsonrw.Value
 		}
 	}
 
-	elem, err := dvd.intDecodeType(dc, vr, val.Type())
-	if err != nil {
-		return err
+	var i64 int64
+	switch vrType := vr.Type(); vrType {
+	case bsontype.Int32:
+		i32, err := vr.ReadInt32()
+		if err != nil {
+			return err
+		}
+		i64 = int64(i32)
+	case bsontype.Int64:
+		i, err := vr.ReadInt64()
+		if err != nil {
+			return err
+		}
+		i64 = i
+	case bsontype.Double:
+		f64, err := vr.ReadDouble()
+		if err != nil {
+			return err
+		}
+		if !dc.Truncate && math.Floor(f64) != f64 {
+			return errCannotTruncate
+		}
+		// WARN: this is a dangerous conversion and implementation defined
+		if f64 > float64(math.MaxInt64) {
+			return fmt.Errorf("%g overflows int64", f64)
+		}
+		// Undefined behavior
+		i64 = int64(f64)
+	case bsontype.Boolean:
+		b, err := vr.ReadBoolean()
+		if err != nil {
+			return err
+		}
+		if b {
+			i64 = 1
+		}
+	case bsontype.Null:
+		if err := vr.ReadNull(); err != nil {
+			return err
+		}
+	case bsontype.Undefined:
+		if err := vr.ReadUndefined(); err != nil {
+			return err
+		}
+	default:
+		return fmt.Errorf("cannot decode %v into an integer type", vrType)
 	}
 
-	val.SetInt(elem.Int())
+	switch val.Kind() {
+	case reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64, reflect.Int:
+		if val.OverflowInt(i64) {
+			return fmt.Errorf("%d overflows %s", i64, val.Kind())
+		}
+	default:
+		return ValueDecoderError{
+			Name:     "IntDecodeValue",
+			Kinds:    []reflect.Kind{reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64, reflect.Int},
+			Received: reflect.Zero(val.Type()),
+		}
+	}
+
+	val.SetInt(i64)
 	return nil
 }
 
@@ -450,69 +432,18 @@ func (dvd DefaultValueDecoders) UintDecodeValue(dc DecodeContext, vr bsonrw.Valu
 }
 
 func (dvd DefaultValueDecoders) floatDecodeType(dc DecodeContext, vr bsonrw.ValueReader, t reflect.Type) (reflect.Value, error) {
-	var f float64
-	var err error
-	switch vrType := vr.Type(); vrType {
-	case bsontype.Int32:
-		i32, err := vr.ReadInt32()
-		if err != nil {
-			return emptyValue, err
-		}
-		f = float64(i32)
-	case bsontype.Int64:
-		i64, err := vr.ReadInt64()
-		if err != nil {
-			return emptyValue, err
-		}
-		f = float64(i64)
-	case bsontype.Double:
-		f, err = vr.ReadDouble()
-		if err != nil {
-			return emptyValue, err
-		}
-	case bsontype.Boolean:
-		b, err := vr.ReadBoolean()
-		if err != nil {
-			return emptyValue, err
-		}
-		if b {
-			f = 1
-		}
-	case bsontype.Null:
-		if err = vr.ReadNull(); err != nil {
-			return emptyValue, err
-		}
-	case bsontype.Undefined:
-		if err = vr.ReadUndefined(); err != nil {
-			return emptyValue, err
-		}
-	default:
-		return emptyValue, fmt.Errorf("cannot decode %v into a float32 or float64 type", vrType)
+	val := reflect.New(t).Elem()
+	if err := dvd.FloatDecodeValue(dc, vr, val); err != nil {
+		return emptyValue, err
 	}
-
-	switch t.Kind() {
-	case reflect.Float32:
-		if !dc.Truncate && float64(float32(f)) != f {
-			return emptyValue, errCannotTruncate
-		}
-
-		return reflect.ValueOf(float32(f)), nil
-	case reflect.Float64:
-		return reflect.ValueOf(f), nil
-	default:
-		return emptyValue, ValueDecoderError{
-			Name:     "FloatDecodeValue",
-			Kinds:    []reflect.Kind{reflect.Float32, reflect.Float64},
-			Received: reflect.Zero(t),
-		}
-	}
+	return val, nil
 }
 
 // FloatDecodeValue is the ValueDecoderFunc for float types.
 //
 // Deprecated: Use [go.mongodb.org/mongo-driver/bson.NewRegistry] to get a registry with all default
 // value decoders registered.
-func (dvd DefaultValueDecoders) FloatDecodeValue(ec DecodeContext, vr bsonrw.ValueReader, val reflect.Value) error {
+func (dvd DefaultValueDecoders) FloatDecodeValue(dc DecodeContext, vr bsonrw.ValueReader, val reflect.Value) error {
 	if !val.CanSet() {
 		return ValueDecoderError{
 			Name:     "FloatDecodeValue",
@@ -521,12 +452,64 @@ func (dvd DefaultValueDecoders) FloatDecodeValue(ec DecodeContext, vr bsonrw.Val
 		}
 	}
 
-	elem, err := dvd.floatDecodeType(ec, vr, val.Type())
-	if err != nil {
-		return err
+	var f float64
+	switch vrType := vr.Type(); vrType {
+	case bsontype.Int32:
+		i32, err := vr.ReadInt32()
+		if err != nil {
+			return err
+		}
+		f = float64(i32)
+	case bsontype.Int64:
+		i64, err := vr.ReadInt64()
+		if err != nil {
+			return err
+		}
+		f = float64(i64)
+	case bsontype.Double:
+		ff, err := vr.ReadDouble()
+		if err != nil {
+			return err
+		}
+		f = ff
+	case bsontype.Boolean:
+		b, err := vr.ReadBoolean()
+		if err != nil {
+			return err
+		}
+		if b {
+			f = 1
+		}
+	case bsontype.Null:
+		if err := vr.ReadNull(); err != nil {
+			return err
+		}
+	case bsontype.Undefined:
+		if err := vr.ReadUndefined(); err != nil {
+			return err
+		}
+	default:
+		return fmt.Errorf("cannot decode %v into a float32 or float64 type", vrType)
 	}
 
-	val.SetFloat(elem.Float())
+	switch val.Kind() {
+	case reflect.Float32:
+		// TODO(charlie): use OverflowFloat instead since the
+		// below conversion is lossy.
+		if !dc.Truncate && float64(float32(f)) != f {
+			return errCannotTruncate
+		}
+	case reflect.Float64:
+		// Ok
+	default:
+		return ValueDecoderError{
+			Name:     "FloatDecodeValue",
+			Kinds:    []reflect.Kind{reflect.Float32, reflect.Float64},
+			Received: reflect.Zero(val.Type()),
+		}
+	}
+
+	val.SetFloat(f)
 	return nil
 }
 
@@ -1324,7 +1307,7 @@ func (dvd DefaultValueDecoders) ByteSliceDecodeValue(_ DecodeContext, vr bsonrw.
 	}
 
 	if vr.Type() == bsontype.Null {
-		val.Set(reflect.Zero(val.Type()))
+		zeroValue(val)
 		return vr.ReadNull()
 	}
 
@@ -1351,7 +1334,7 @@ func (dvd DefaultValueDecoders) MapDecodeValue(dc DecodeContext, vr bsonrw.Value
 	switch vr.Type() {
 	case bsontype.Type(0), bsontype.EmbeddedDocument:
 	case bsontype.Null:
-		val.Set(reflect.Zero(val.Type()))
+		zeroValue(val)
 		return vr.ReadNull()
 	default:
 		return fmt.Errorf("cannot decode %v into a %s", vr.Type(), val.Type())
@@ -1434,10 +1417,10 @@ func (dvd DefaultValueDecoders) ArrayDecodeValue(dc DecodeContext, vr bsonrw.Val
 		}
 		return nil
 	case bsontype.Null:
-		val.Set(reflect.Zero(val.Type()))
+		zeroValue(val)
 		return vr.ReadNull()
 	case bsontype.Undefined:
-		val.Set(reflect.Zero(val.Type()))
+		zeroValue(val)
 		return vr.ReadUndefined()
 	default:
 		return fmt.Errorf("cannot decode %v into an array", vrType)
@@ -1478,7 +1461,7 @@ func (dvd DefaultValueDecoders) SliceDecodeValue(dc DecodeContext, vr bsonrw.Val
 	switch vr.Type() {
 	case bsontype.Array:
 	case bsontype.Null:
-		val.Set(reflect.Zero(val.Type()))
+		zeroValue(val)
 		return vr.ReadNull()
 	case bsontype.Type(0), bsontype.EmbeddedDocument:
 		if val.Type().Elem() != tE {
@@ -1577,7 +1560,7 @@ func (dvd DefaultValueDecoders) UnmarshalerDecodeValue(_ DecodeContext, vr bsonr
 	// the behavior of the Go "encoding/json" unmarshaler when the target Go value is a pointer and
 	// the JSON field value is "null".
 	if val.Kind() == reflect.Ptr && len(src) == 0 {
-		val.Set(reflect.Zero(val.Type()))
+		zeroValue(val)
 		return nil
 	}
 
@@ -1614,7 +1597,7 @@ func (dvd DefaultValueDecoders) EmptyInterfaceDecodeValue(dc DecodeContext, vr b
 			}
 			rtype = tD
 		case bsontype.Null:
-			val.Set(reflect.Zero(val.Type()))
+			zeroValue(val)
 			return vr.ReadNull()
 		default:
 			return err

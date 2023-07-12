@@ -56,11 +56,11 @@ func (sc SliceCodec) EncodeValue(ec EncodeContext, vw bsonrw.ValueWriter, val re
 
 	// If we have a []byte we want to treat it as a binary instead of as an array.
 	if val.Type().Elem() == tByte {
-		byteSlice := make([]byte, val.Len())
-		reflect.Copy(reflect.ValueOf(byteSlice), val)
-		return vw.WriteBinary(byteSlice)
+		return vw.WriteBinary(val.Bytes())
 	}
 
+	// WARN: this might be slow
+	//
 	// If we have a []primitive.E we want to treat it as a document instead of as an array.
 	if val.Type() == tD || val.Type().ConvertibleTo(tD) {
 		d := val.Convert(tD).Interface().(primitive.D)
@@ -127,10 +127,10 @@ func (sc *SliceCodec) DecodeValue(dc DecodeContext, vr bsonrw.ValueReader, val r
 	switch vrType := vr.Type(); vrType {
 	case bsontype.Array:
 	case bsontype.Null:
-		val.Set(reflect.Zero(val.Type()))
+		zeroValue(val)
 		return vr.ReadNull()
 	case bsontype.Undefined:
-		val.Set(reflect.Zero(val.Type()))
+		zeroValue(val)
 		return vr.ReadUndefined()
 	case bsontype.Type(0), bsontype.EmbeddedDocument:
 		if val.Type().Elem() != tE {

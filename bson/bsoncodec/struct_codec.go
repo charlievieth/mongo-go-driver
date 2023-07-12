@@ -266,14 +266,14 @@ func (sc *StructCodec) DecodeValue(dc DecodeContext, vr bsonrw.ValueReader, val 
 			return err
 		}
 
-		val.Set(reflect.Zero(val.Type()))
+		zeroValue(val)
 		return nil
 	case bsontype.Undefined:
 		if err := vr.ReadUndefined(); err != nil {
 			return err
 		}
 
-		val.Set(reflect.Zero(val.Type()))
+		zeroValue(val)
 		return nil
 	default:
 		return fmt.Errorf("cannot decode %v into a %s", vrType, val.Type())
@@ -285,7 +285,7 @@ func (sc *StructCodec) DecodeValue(dc DecodeContext, vr bsonrw.ValueReader, val 
 	}
 
 	if sc.DecodeZeroStruct || dc.zeroStructs {
-		val.Set(reflect.Zero(val.Type()))
+		zeroValue(val)
 	}
 	if sc.DecodeDeepZeroInline && sd.inline {
 		val.Set(deepZero(val.Type()))

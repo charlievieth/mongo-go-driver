@@ -8,6 +8,7 @@ package bsonrw
 
 import (
 	"bytes"
+	"encoding/binary"
 	"fmt"
 	"io"
 	"math"
@@ -1535,4 +1536,19 @@ func errequal(t *testing.T, err1, err2 error) bool {
 	}
 
 	return false
+}
+
+func BenchmarkReadString(b *testing.B) {
+	s := []byte("    abcdefghijklmnopqrstuvwxyz12345\x00")
+	binary.LittleEndian.PutUint32(s, uint32(len(s)-4))
+	vr := valueReader{
+		d:      s,
+		offset: 0,
+	}
+	for i := 0; i < b.N; i++ {
+		if _, err := vr.readString(); err != nil {
+			b.Fatal(err)
+		}
+		vr.offset = 0
+	}
 }

@@ -139,22 +139,10 @@ func (vr *valueReader) reset(b []byte) {
 }
 
 func (vr *valueReader) advanceFrame() {
-	if vr.frame+1 >= int64(len(vr.stack)) { // We need to grow the stack
-		length := len(vr.stack)
-		if length+1 >= cap(vr.stack) {
-			// double it
-			buf := make([]vrState, 2*cap(vr.stack)+1)
-			copy(buf, vr.stack)
-			vr.stack = buf
-		}
-		vr.stack = vr.stack[:length+1]
+	if vr.frame+1 >= int64(len(vr.stack)) {
+		vr.stack = append(vr.stack, vrState{})
 	}
 	vr.frame++
-
-	// Clean the stack
-	vr.stack[vr.frame].mode = 0
-	vr.stack[vr.frame].vType = 0
-	vr.stack[vr.frame].end = 0
 }
 
 func (vr *valueReader) pushDocument() error {

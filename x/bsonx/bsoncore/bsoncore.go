@@ -33,6 +33,8 @@ func AppendType(dst []byte, t bsontype.Type) []byte { return append(dst, byte(t)
 // AppendKey will append key to dst and return the extended buffer.
 func AppendKey(dst []byte, key string) []byte { return append(dst, key+nullTerminator...) }
 
+// NB: bsoncore.AppendHeader and bsonrw.AppendHeader must be kept in sync.
+
 // AppendHeader will append Type t and key to dst and return the extended
 // buffer.
 func AppendHeader(dst []byte, t bsontype.Type, key string) []byte {
