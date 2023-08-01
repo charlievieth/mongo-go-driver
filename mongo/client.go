@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"sync/atomic"
 	"time"
 
 	"go.mongodb.org/mongo-driver/bson"
@@ -55,6 +56,7 @@ type Client struct {
 	id             uuid.UUID
 	deployment     driver.Deployment
 	localThreshold time.Duration
+	connState      connState
 	retryWrites    bool
 	retryReads     bool
 	clock          *session.ClusterClock
@@ -79,6 +81,43 @@ type Client struct {
 	metadataClientFLE  *Client
 	internalClientFLE  *Client
 	encryptedFieldsMap map[string]interface{}
+}
+
+// TODO(charlie): the operations here are atomic, but the code they guard is
+// not thread-safe - should we use non-atomic operations instead?
+//
+// connState represents the connection state of a Client.
+type connState int32
+
+const (
+	connStateNone int32 = iota
+	connStateConnected
+	connStateDisconnected
+)
+
+// Connect returns if the connState was able to successfully transition to
+// connStateConnected (false is only returned if the Client was already
+// connected).
+func (c *connState) Connect() bool {
+	// There are two disconnected states: "stateNone" and "stateDisconnected".
+	// We need to spin until we can successfully CAS to "stateConnected" or the
+	// state becomes "stateConnected" (due to another thread).
+	for {
+		state := atomic.LoadInt32((*int32)(c))
+		if state == connStateConnected {
+			return false
+		}
+		if atomic.CompareAndSwapInt32((*int32)(c), state, connStateConnected) {
+			return true
+		}
+	}
+}
+
+// Disconnect returns if the connState was able to successfully transition to
+// connStateDisconnected (false is only returned if the connState was already
+// in connStateDisconnected).
+func (c *connState) Disconnect() bool {
+	return atomic.CompareAndSwapInt32((*int32)(c), connStateConnected, connStateDisconnected)
 }
 
 // Connect creates a new Client and then initializes it using the Connect method. This is equivalent to calling
@@ -243,6 +282,10 @@ func NewClient(opts ...*options.ClientOptions) (*Client, error) {
 //
 // Deprecated: Use [mongo.Connect] instead.
 func (c *Client) Connect(ctx context.Context) error {
+	if !c.connState.Connect() {
+		return nil
+	}
+
 	if connector, ok := c.deployment.(driver.Connector); ok {
 		err := connector.Connect()
 		if err != nil {
@@ -295,6 +338,10 @@ func (c *Client) Connect(ctx context.Context) error {
 // or write operations. If this method returns with no errors, all connections
 // associated with this Client have been closed.
 func (c *Client) Disconnect(ctx context.Context) error {
+	if !c.connState.Disconnect() {
+		return ErrClientDisconnected
+	}
+
 	if c.logger != nil {
 		defer c.logger.Close()
 	}
