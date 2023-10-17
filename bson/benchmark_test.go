@@ -11,12 +11,12 @@ import (
 	"compress/gzip"
 	"encoding/json"
 	"fmt"
-	"io"
 	"io/ioutil"
 	"os"
 	"path"
 	"sync"
 	"testing"
+	"time"
 )
 
 type encodetest struct {
@@ -137,41 +137,49 @@ var (
 	extJSONFilesMu sync.Mutex
 )
 
+func readGzipFile(t testing.TB, name string) []byte {
+	fatal := func(a ...interface{}) {
+		if t != nil {
+			t.Fatal(a...)
+		}
+		panic(fmt.Sprint(a...))
+	}
+
+	f, err := os.Open(name)
+	if err != nil {
+		fatal(err)
+	}
+	defer f.Close()
+
+	gr, err := gzip.NewReader(f)
+	if err != nil {
+		fatal(err)
+	}
+	data, err := ioutil.ReadAll(gr)
+	if err != nil {
+		fatal(err)
+	}
+	if err := gr.Close(); err != nil {
+		fatal(err)
+	}
+	return data
+}
+
 // readExtJSONFile reads the GZIP-compressed extended JSON document from the given filename in the
 // "extended BSON" test data directory (../testdata/extended_bson) and returns it as a
 // map[string]interface{}. It panics on any errors.
-func readExtJSONFile(filename string) map[string]interface{} {
+func readExtJSONFile(t testing.TB, filename string) map[string]interface{} {
 	extJSONFilesMu.Lock()
 	defer extJSONFilesMu.Unlock()
 	if v, ok := extJSONFiles[filename]; ok {
 		return v
 	}
-	filePath := path.Join(extendedBSONDir, filename)
-	file, err := os.Open(filePath)
-	if err != nil {
-		panic(fmt.Sprintf("error opening file %q: %s", filePath, err))
-	}
-	defer func() {
-		_ = file.Close()
-	}()
 
-	gz, err := gzip.NewReader(file)
-	if err != nil {
-		panic(fmt.Sprintf("error creating GZIP reader: %s", err))
-	}
-	defer func() {
-		_ = gz.Close()
-	}()
-
-	data, err := ioutil.ReadAll(gz)
-	if err != nil {
-		panic(fmt.Sprintf("error reading GZIP contents of file: %s", err))
-	}
+	data := readGzipFile(t, path.Join(extendedBSONDir, filename))
 
 	var v map[string]interface{}
-	err = UnmarshalExtJSON(data, false, &v)
-	if err != nil {
-		panic(fmt.Sprintf("error unmarshalling extended JSON: %s", err))
+	if err := UnmarshalExtJSON(data, false, &v); err != nil {
+		t.Fatalf("error unmarshalling extended JSON: %s", err)
 	}
 
 	if extJSONFiles == nil {
@@ -196,15 +204,15 @@ func BenchmarkMarshal(b *testing.B) {
 		},
 		{
 			desc:  "deep_bson.json.gz",
-			value: readExtJSONFile("deep_bson.json.gz"),
+			value: readExtJSONFile(b, "deep_bson.json.gz"),
 		},
 		{
 			desc:  "flat_bson.json.gz",
-			value: readExtJSONFile("flat_bson.json.gz"),
+			value: readExtJSONFile(b, "flat_bson.json.gz"),
 		},
 		{
 			desc:  "full_bson.json.gz",
-			value: readExtJSONFile("full_bson.json.gz"),
+			value: readExtJSONFile(b, "full_bson.json.gz"),
 		},
 	}
 
@@ -255,15 +263,15 @@ func BenchmarkUnmarshal(b *testing.B) {
 		},
 		{
 			desc:  "deep_bson.json.gz",
-			value: readExtJSONFile("deep_bson.json.gz"),
+			value: readExtJSONFile(b, "deep_bson.json.gz"),
 		},
 		{
 			desc:  "flat_bson.json.gz",
-			value: readExtJSONFile("flat_bson.json.gz"),
+			value: readExtJSONFile(b, "flat_bson.json.gz"),
 		},
 		{
 			desc:  "full_bson.json.gz",
-			value: readExtJSONFile("full_bson.json.gz"),
+			value: readExtJSONFile(b, "full_bson.json.gz"),
 		},
 	}
 
@@ -346,23 +354,12 @@ var codeBSON []byte
 var codeStruct codeResponse
 
 func codeInit() {
-	f, err := os.Open("testdata/code.json.gz")
-	if err != nil {
-		panic(err)
-	}
-	defer f.Close()
-	gz, err := gzip.NewReader(f)
-	if err != nil {
-		panic(err)
-	}
-	data, err := io.ReadAll(gz)
-	if err != nil {
-		panic(err)
-	}
+	data := readGzipFile(nil, "testdata/code.json.gz")
 
 	codeJSON = data
 
-	if err := json.Unmarshal(codeJSON, &codeStruct); err != nil {
+	err := json.Unmarshal(codeJSON, &codeStruct)
+	if err != nil {
 		panic("json.Unmarshal code.json: " + err.Error())
 	}
 
@@ -445,5 +442,111 @@ func BenchmarkCodeMarshal(b *testing.B) {
 			}
 		})
 		b.SetBytes(int64(len(codeJSON)))
+	})
+}
+
+type HistogramValue struct {
+	Micros int64 `json:"m" bson:"m"`
+	Count  int64 `json:"c" bson:"c"`
+}
+
+type Histogram struct {
+	Histogram []HistogramValue `json:"h" bson:"h"`
+	Latency   int64            `json:"l" bson:"l"`
+	Ops       int64            `json:"o" bson:"o"`
+}
+
+type LatencyStat struct {
+	Commands Histogram `json:"cmds" bson:"cmds"`
+	Reads    Histogram `json:"r" bson:"r"`
+	Writes   Histogram `json:"w" bson:"w"`
+}
+
+type LatencyStats struct {
+	Namespace string      `json:"ns" bson:"ns"`
+	Time      time.Time   `json:"_t" bson:"_t"`
+	Stats     LatencyStat `json:"ls" bson:"ls"`
+	T         []string    `json:"t" bson:"t"`
+}
+
+type CollStat struct {
+	ID           string         `json:"_id" bson:"_id"`
+	Time         time.Time      `json:"_t" bson:"_t"`
+	RTime        time.Time      `json:"_r" bson:"_r"`
+	Host         string         `json:"hp" bson:"hp"`
+	LatencyStats []LatencyStats `json:"lsl" bson:"lsl"`
+	RB           int            `json:"rb" bson:"rb"`
+	Shard        string         `json:"s" bson:"s"`
+}
+
+var collStatJSON []byte
+var collStatBSON []byte
+var collStatStruct CollStat
+
+func collStatInit() {
+	data := readGzipFile(nil, "testdata/collstat.json.gz")
+
+	collStatJSON = data
+
+	err := json.Unmarshal(collStatJSON, &collStatStruct)
+	if err != nil {
+		panic("json.Unmarshal collstat.json: " + err.Error())
+	}
+
+	if data, err = json.Marshal(&collStatStruct); err != nil {
+		panic("json.Marshal collstat.json: " + err.Error())
+	}
+	// if err := os.WriteFile("testdata/collstat.json.gz", data, 0644); err != nil {
+	// 	panic(err.Error())
+	// }
+	// panic("DONE")
+
+	if collStatBSON, err = Marshal(&collStatStruct); err != nil {
+		panic("Marshal collstat.json: " + err.Error())
+	}
+
+	if !bytes.Equal(data, collStatJSON) {
+		println("different lengths", len(data), len(collStatJSON))
+		for i := 0; i < len(data) && i < len(collStatJSON); i++ {
+			if data[i] != collStatJSON[i] {
+				println("re-marshal: changed at byte", i)
+				println("orig: ", string(collStatJSON[i-10:i+10]))
+				println("new:  ", string(data[i-10:i+10]))
+				break
+			}
+		}
+		panic("re-marshal collstat.json: different result")
+	}
+}
+
+func BenchmarkCollStatUnmarshal(b *testing.B) {
+	b.ReportAllocs()
+	if collStatJSON == nil {
+		b.StopTimer()
+		collStatInit()
+		b.StartTimer()
+	}
+	b.Run("BSON", func(b *testing.B) {
+		b.RunParallel(func(pb *testing.PB) {
+			for pb.Next() {
+				var r CollStat
+				if err := Unmarshal(collStatBSON, &r); err != nil {
+					b.Fatal("Unmarshal:", err)
+				}
+			}
+		})
+		// b.SetBytes(int64(len(collStatJSON)))
+		b.SetBytes(int64(len(collStatBSON)))
+	})
+	b.Run("JSON", func(b *testing.B) {
+		b.RunParallel(func(pb *testing.PB) {
+			for pb.Next() {
+				var r CollStat
+				if err := json.Unmarshal(collStatJSON, &r); err != nil {
+					b.Fatal("json.Unmarshal:", err)
+				}
+			}
+		})
+		b.SetBytes(int64(len(collStatJSON)))
 	})
 }

@@ -9,6 +9,7 @@ package bsoncodec
 import (
 	"fmt"
 	"reflect"
+	"unsafe"
 
 	"go.mongodb.org/mongo-driver/bson/bsonoptions"
 	"go.mongodb.org/mongo-driver/bson/bsonrw"
@@ -162,13 +163,13 @@ func (sc *SliceCodec) DecodeValue(dc DecodeContext, vr bsonrw.ValueReader, val r
 		if err != nil {
 			return err
 		}
-		byteStr := []byte(str)
 
 		if val.IsNil() {
-			val.Set(reflect.MakeSlice(val.Type(), 0, len(byteStr)))
+			val.Set(reflect.MakeSlice(val.Type(), 0, len(str)))
+		} else {
+			val.SetLen(0)
 		}
-		val.SetLen(0)
-		val.Set(reflect.AppendSlice(val, reflect.ValueOf(byteStr)))
+		val.Set(reflect.AppendSlice(val, reflect.ValueOf(*(*[]byte)(unsafe.Pointer(&str)))))
 		return nil
 	default:
 		return fmt.Errorf("cannot decode %v into a slice", vrType)
